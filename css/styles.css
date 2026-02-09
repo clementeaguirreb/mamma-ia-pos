@@ -1,0 +1,184 @@
+/* ============================================
+   MAMMA IA POS v5.6 - Estilos
+   ============================================ */
+
+/* Base */
+[x-cloak] { display: none !important; }
+body { 
+    background-color: #f3f4f6; 
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* Scroll suave en móvil */
+.overflow-y-auto {
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Loader */
+#loader { 
+    position: fixed; 
+    inset: 0; 
+    z-index: 60; 
+    display: flex; 
+    flex-direction: column; 
+    justify-content: center; 
+    align-items: center; 
+    background: white; 
+}
+
+.spinner { 
+    width: 40px; 
+    height: 40px; 
+    border: 4px solid #f3f3f3; 
+    border-top: 4px solid #c0392b; 
+    border-radius: 50%; 
+    animation: spin 1s linear infinite; 
+}
+
+@keyframes spin { 
+    0% { transform: rotate(0deg); } 
+    100% { transform: rotate(360deg); } 
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #9ca3af; }
+
+/* Colores Salsas */
+.btn-roja { background: #FEF2F2; border: 1px solid #FCA5A5; color: #991B1B; }
+.btn-alfredo { background: #F8FAFC; border: 1px solid #CBD5E1; color: #475569; }
+.btn-carne { background: #FFF7ED; border: 1px solid #FDBA74; color: #9A3412; }
+.btn-especial { background: #FAF5FF; border: 1px solid #D8B4FE; color: #6B21A8; }
+.btn-salsa:active { transform: scale(0.98); }
+
+/* Masas */
+.masa-huevo { background: #FEF9C3; border-color: #FACC15; color: #854D0E; }
+.masa-espinaca { background: #DCFCE7; border-color: #4ADE80; color: #14532D; }
+.masa-betarraga { background: #FCE7F3; border-color: #F472B6; color: #831843; }
+
+/* Toggle */
+.toggle-checkbox:checked { right: 0; border-color: #3b82f6; }
+.toggle-checkbox:checked + .toggle-label { background-color: #3b82f6; }
+
+/* Animaciones */
+@keyframes fade-in-up {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in-up { animation: fade-in-up 0.3s ease-out; }
+
+/* Drag & Drop */
+.drag-handle {
+    cursor: grab;
+    touch-action: none;
+}
+.drag-handle:active {
+    cursor: grabbing;
+}
+.sortable-ghost {
+    opacity: 0.4;
+    background: #fef3c7 !important;
+}
+.sortable-chosen {
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+/* Inputs móvil - 16px para evitar zoom en iOS */
+input[type="time"],
+input[type="date"],
+input[type="number"],
+input[type="text"],
+input[type="password"] {
+    font-size: 16px;
+}
+
+@media (min-width: 768px) {
+    input[type="time"],
+    input[type="date"],
+    input[type="number"],
+    input[type="text"],
+    input[type="password"] {
+        font-size: inherit;
+    }
+}
+
+/* Inputs pequeños en Admin (excepción al 16px) */
+.input-price-sm {
+    font-size: 11px !important;
+    width: 3.5rem;
+}
+
+/* Input de hora - más limpio cuando está vacío */
+input[type="time"]::-webkit-datetime-edit-fields-wrapper {
+    padding: 0;
+}
+input[type="time"]::-webkit-calendar-picker-indicator {
+    cursor: pointer;
+    opacity: 0.6;
+}
+input[type="time"]::-webkit-calendar-picker-indicator:hover {
+    opacity: 1;
+}
+
+/* Focus */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+    outline: 2px solid #3b82f6;
+    outline-offset: 2px;
+}
+
+/* Print */
+@media print {
+    nav, .no-print { display: none !important; }
+    body { background: white; }
+}
+
+/* Safe Area iOS */
+@supports (padding-top: env(safe-area-inset-top)) {
+    body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+    }
+}
+
+/* ============================================
+   Vista Cocina Simplificada
+   ============================================ */
+.kitchen-simple {
+    background: #f1f5f9;
+}
+
+.kitchen-simple .order-card {
+    transition: all 0.15s ease;
+}
+
+.kitchen-simple .btn-ready:hover {
+    transform: scale(1.02);
+}
+
+.kitchen-simple .btn-ready:active {
+    transform: scale(0.98);
+}
+
+@keyframes urgent-pulse {
+    0%, 100% { background-color: #ffffff; }
+    50% { background-color: #fee2e2; }
+}
+
+.kitchen-simple .urgent {
+    animation: urgent-pulse 1s ease-in-out infinite;
+}
+
+.kbd {
+    background: #e5e7eb;
+    color: #374151;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: monospace;
+    border: 1px solid #d1d5db;
+}

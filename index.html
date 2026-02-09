@@ -1,0 +1,1419 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Mamma Ia POS v6.3</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-auth.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="h-screen flex flex-col font-sans text-gray-800 select-none" x-data="app()" x-init="init()">
+
+    <!-- Loader -->
+    <div id="loader" x-show="loading" x-cloak>
+        <div class="spinner mb-4"></div>
+        <div class="font-bold text-red-800 text-xl">MAMMA IA v6.3</div>
+        <div class="text-gray-400 text-sm">Cargando...</div>
+    </div>
+
+    <!-- Login Modal -->
+    <div x-show="!isLoggedIn && !loading" x-cloak class="fixed inset-0 z-[80] bg-gradient-to-br from-red-900 via-red-800 to-red-900 flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm">
+            <div class="text-center mb-6">
+                <i class="fa-solid fa-utensils text-4xl text-red-800 mb-2"></i>
+                <h1 class="text-2xl font-black text-gray-800">MAMMA IA</h1>
+                <p class="text-gray-400 text-sm">Sistema POS v6.3</p>
+            </div>
+            
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">PIN de Acceso</label>
+                    <input type="password" x-model="pinInput" @keyup.enter="login()" 
+                           inputmode="numeric" pattern="[0-9]*" maxlength="6"
+                           class="w-full border-2 border-gray-200 rounded-xl p-4 text-center text-2xl tracking-widest font-bold focus:border-red-500 focus:outline-none transition"
+                           placeholder="••••••">
+                </div>
+                <div x-show="loginError" class="text-red-500 text-xs text-center font-bold animate-pulse" x-text="loginError"></div>
+                <button @click="login()" class="w-full bg-red-800 hover:bg-red-900 text-white font-bold py-4 rounded-xl transition shadow-lg active:scale-95">
+                    <i class="fa-solid fa-key mr-2"></i> INGRESAR
+                </button>
+            </div>
+            
+            <div class="mt-6 pt-4 border-t text-center">
+                <div class="text-[10px] text-gray-400">
+                    <span class="font-bold">Admin:</span> Acceso completo<br>
+                    <span class="font-bold">Invitado:</span> Solo Caja
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div x-show="toast.show" x-cloak class="fixed top-4 right-4 z-[70] px-4 py-3 rounded-xl shadow-xl text-white font-bold text-sm transition-all"
+         :class="toast.type === 'success' ? 'bg-green-600' : toast.type === 'warning' ? 'bg-yellow-600' : 'bg-red-600'" x-transition>
+        <span x-text="toast.msg"></span>
+    </div>
+
+    <!-- Modal Variantes (funciona para Caja y Cocina) -->
+    <div x-show="showVariantModal" x-cloak class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" x-transition>
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-sm" @click.away="showVariantModal = false; tempExtra = null; kitchenExtraOrder = null">
+            <h3 class="text-lg font-bold mb-4 text-center" x-text="tempExtra?.name"></h3>
+            <div class="grid gap-2">
+                <template x-for="v in tempExtra?.variants">
+                    <button @click="kitchenExtraOrder ? selectKitchenVariant(v) : selectVariant(v)"
+                            :disabled="v.disabled || (v.trackStock === true && (stock['extra_'+tempExtra?.name+'_'+v.name] || 0) <= 0)"
+                            :class="v.disabled || (v.trackStock === true && (stock['extra_'+tempExtra?.name+'_'+v.name] || 0) <= 0) ? 'opacity-50 cursor-not-allowed bg-gray-100' : 'bg-gray-50 hover:bg-gray-100'"
+                            class="w-full py-3 border rounded-lg flex justify-between items-center px-4 font-bold text-gray-700">
+                        <span x-text="v.name"></span>
+                        <div class="flex items-center gap-2">
+                            <!-- Mostrar stock si trackStock está activo -->
+                            <span x-show="v.trackStock === true" class="text-xs px-2 py-0.5 rounded-full font-bold"
+                                  :class="(stock['extra_'+tempExtra?.name+'_'+v.name] || 0) <= 0 ? 'bg-red-100 text-red-600' :
+                                          (stock['extra_'+tempExtra?.name+'_'+v.name] || 0) < 5 ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'"
+                                  x-text="(stock['extra_'+tempExtra?.name+'_'+v.name] || 0) + ' disp.'"></span>
+                            <span class="text-green-600" x-text="v.disabled ? 'AGOTADO' : (v.trackStock === true && (stock['extra_'+tempExtra?.name+'_'+v.name] || 0) <= 0) ? 'SIN STOCK' : formatPrice(v.price)"></span>
+                        </div>
+                    </button>
+                </template>
+            </div>
+            <button @click="showVariantModal = false; tempExtra = null; kitchenExtraOrder = null" class="mt-4 w-full text-red-500 text-sm underline">Cancelar</button>
+        </div>
+    </div>
+
+    <!-- Modal Método de Pago (Cocina) -->
+    <div x-show="showPaymentModal" x-cloak class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" x-transition>
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-xs" @click.away="showPaymentModal = false">
+            <h3 class="text-lg font-bold mb-4 text-center"><i class="fa-solid fa-credit-card mr-2"></i>Método de Pago</h3>
+            <div class="grid gap-2">
+                <button @click="setPaymentMethod('Efectivo')" class="w-full py-3 bg-green-50 hover:bg-green-100 border border-green-200 rounded-lg font-bold text-green-800">
+                    <i class="fa-solid fa-money-bill-wave mr-2"></i> Efectivo
+                </button>
+                <button @click="setPaymentMethod('Tarjeta')" class="w-full py-3 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-lg font-bold text-blue-800">
+                    <i class="fa-solid fa-credit-card mr-2"></i> Tarjeta
+                </button>
+                <button @click="setPaymentMethod('Transferencia')" class="w-full py-3 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg font-bold text-purple-800">
+                    <i class="fa-solid fa-building-columns mr-2"></i> Transferencia
+                </button>
+            </div>
+            <button @click="showPaymentModal = false" class="mt-4 w-full text-gray-500 text-sm underline">Cancelar</button>
+        </div>
+    </div>
+
+    <!-- Modal Extras Cocina -->
+    <div x-show="showKitchenExtrasModal" x-cloak class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" x-transition>
+        <div class="bg-white rounded-xl shadow-2xl p-4 w-full max-w-sm max-h-[80vh] overflow-y-auto" @click.away="showKitchenExtrasModal = false; kitchenExtraOrder = null">
+            <div class="flex justify-between items-center mb-4 pb-2 border-b">
+                <h3 class="text-lg font-bold">
+                    <i class="fa-solid fa-plus-circle text-blue-500 mr-2"></i>Agregar Extra
+                </h3>
+                <span class="bg-gray-100 px-2 py-1 rounded font-bold text-sm" x-text="'#' + kitchenExtraOrder?.number"></span>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <template x-for="e in config.extras">
+                    <button @click="handleKitchenExtraClick(e)"
+                            :disabled="e.disabled || ((!e.variants || e.variants.length === 0) && e.trackStock === true && (stock['extra_'+e.name] || 0) <= 0)"
+                            :class="e.disabled || ((!e.variants || e.variants.length === 0) && e.trackStock === true && (stock['extra_'+e.name] || 0) <= 0) ? 'opacity-50 cursor-not-allowed bg-gray-100' : 'bg-gray-50 hover:bg-gray-100'"
+                            class="border rounded-lg p-3 text-center font-bold text-sm transition relative">
+                        <span x-text="e.name"></span>
+                        <div class="text-xs mt-1"
+                             :class="e.disabled ? 'text-gray-400' : ((!e.variants || e.variants.length === 0) && e.trackStock === true && (stock['extra_'+e.name] || 0) <= 0) ? 'text-red-500' : 'text-green-600'"
+                             x-text="e.disabled ? 'AGOTADO' : ((!e.variants || e.variants.length === 0) && e.trackStock === true && (stock['extra_'+e.name] || 0) <= 0) ? 'SIN STOCK' : getExtraPriceDisplay(e)"></div>
+                        <!-- Indicador de stock para extras sin variantes -->
+                        <div x-show="(!e.variants || e.variants.length === 0) && e.trackStock === true && !e.disabled && (stock['extra_'+e.name] || 0) > 0"
+                             class="absolute top-1 right-1 text-[9px] px-1.5 rounded-full font-bold"
+                             :class="(stock['extra_'+e.name] || 0) < 3 ? 'bg-orange-500 text-white' : 'bg-blue-100 text-blue-600'"
+                             x-text="stock['extra_'+e.name] || 0">
+                        </div>
+                    </button>
+                </template>
+            </div>
+            <button @click="showKitchenExtrasModal = false; kitchenExtraOrder = null" class="mt-4 w-full text-red-500 text-sm underline">Cancelar</button>
+        </div>
+    </div>
+
+    <!-- Modal Definir Hora Listo -->
+    <div x-show="showReadyTimeModal" x-cloak class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4" x-transition>
+        <div class="bg-white rounded-xl shadow-2xl p-6 w-full max-w-xs" @click.away="showReadyTimeModal = false">
+            <h3 class="text-lg font-bold mb-4 text-center"><i class="fa-solid fa-clock mr-2"></i>Hora de Listo</h3>
+            <p class="text-xs text-gray-500 text-center mb-4">Define la hora real en que quedó listo el pedido</p>
+            <input type="time" x-model="customReadyTime" class="w-full border-2 rounded-lg p-3 text-center font-bold text-lg mb-4">
+            <div class="grid grid-cols-2 gap-2">
+                <button @click="showReadyTimeModal = false" class="py-2 border rounded-lg font-bold text-gray-600">Cancelar</button>
+                <button @click="confirmReadyWithTime()" class="py-2 bg-green-600 text-white rounded-lg font-bold">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Historial de Pedidos -->
+    <div x-show="showHistoryModal" x-cloak class="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-2 md:p-4" x-transition>
+        <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col" @click.away="showHistoryModal = false">
+            <div class="p-4 border-b flex justify-between items-center shrink-0">
+                <h3 class="text-lg font-bold"><i class="fa-solid fa-clock-rotate-left mr-2"></i>Historial de Pedidos</h3>
+                <button @click="showHistoryModal = false" class="text-gray-400 hover:text-gray-600 text-xl">&times;</button>
+            </div>
+            <div class="flex-1 overflow-y-auto p-4">
+                <div class="space-y-2">
+                    <template x-for="o in historyOrders" :key="o.id">
+                        <div class="bg-gray-50 p-3 rounded-lg border flex flex-col md:flex-row md:items-center gap-2">
+                            <div class="flex items-center gap-3 flex-1">
+                                <span class="font-black text-lg text-gray-400">#<span x-text="o.number"></span></span>
+                                <div class="flex-1 min-w-0">
+                                    <div class="font-bold text-sm truncate" x-text="o.customer || 'Sin nombre'"></div>
+                                    <div class="text-[10px] text-gray-500" x-text="o.items.map(i => i.title).join(', ')"></div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-3 text-xs shrink-0">
+                                <span class="text-gray-500" x-text="o.date + ' ' + formatTime(o.timestamp)"></span>
+                                <span class="px-2 py-1 rounded text-[10px] font-bold"
+                                      :class="o.status === 'Listo' ? 'bg-green-100 text-green-700' : o.status === 'Pendiente' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-700'"
+                                      x-text="o.status"></span>
+                                <span x-show="o.paymentMethod" class="px-2 py-1 rounded text-[10px] font-bold bg-blue-100 text-blue-700" x-text="o.paymentMethod"></span>
+                                <span class="font-bold text-green-600" x-text="formatPrice(o.total)"></span>
+                            </div>
+                        </div>
+                    </template>
+                </div>
+                <div x-show="historyOrders.length === 0" class="text-center text-gray-400 py-8">
+                    <i class="fa-solid fa-inbox text-4xl mb-2"></i>
+                    <p>No hay pedidos en este rango</p>
+                </div>
+                <!-- Botón cargar más -->
+                <div x-show="hasMoreHistory" class="text-center mt-4">
+                    <button @click="loadMoreHistory()" class="bg-gray-100 hover:bg-gray-200 px-4 py-2 rounded-lg font-bold text-xs text-gray-600">
+                        <i class="fa-solid fa-plus mr-1"></i> Cargar más
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Navbar -->
+    <nav x-show="isLoggedIn" class="bg-red-900 text-white p-2 md:p-3 shadow-md flex justify-between items-center shrink-0 z-40">
+        <div class="font-black text-base md:text-lg tracking-wider flex items-center gap-2">
+            <i class="fa-solid fa-utensils"></i>
+            <span>MAMMA IA</span>
+            <span class="text-[10px] opacity-50 hidden sm:inline">v6.3</span>
+            <!-- Contador de platos vendidos hoy -->
+            <div x-show="todayDishCount > 0" class="bg-green-500 text-[10px] px-2 py-0.5 rounded ml-2 font-bold">
+                <i class="fa-solid fa-bowl-food mr-1"></i><span x-text="'Hoy: ' + todayDishCount"></span>
+            </div>
+            <div x-show="!online" class="bg-red-500 text-[10px] px-2 py-0.5 rounded animate-pulse ml-2">OFFLINE</div>
+            <div x-show="userRole === 'guest'" class="bg-yellow-500 text-[10px] px-2 py-0.5 rounded text-yellow-900 ml-2">INVITADO</div>
+        </div>
+        <div class="flex gap-1 md:gap-2 items-center">
+            <template x-for="t in visibleTabs">
+                <button @click="changeView(t.id)" 
+                        :class="view===t.id ? 'bg-yellow-500 text-red-900' : 'bg-red-800 text-white'" 
+                        class="px-2 md:px-3 py-2 rounded-lg font-bold transition relative shadow-sm text-xs md:text-sm">
+                    <i :class="t.icon"></i>
+                    <span x-text="t.label" class="hidden lg:inline ml-1"></span>
+                    <span x-show="t.id==='kitchen' && pendingCount>0" 
+                          class="absolute -top-1 -right-1 bg-white text-red-600 text-[10px] rounded-full h-4 w-4 md:h-5 md:w-5 flex items-center justify-center font-bold shadow-sm" 
+                          x-text="pendingCount"></span>
+                </button>
+            </template>
+            <button @click="logout()" class="bg-red-950 hover:bg-black px-2 md:px-3 py-2 rounded-lg transition text-xs">
+                <i class="fa-solid fa-sign-out-alt"></i>
+            </button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main x-show="isLoggedIn" class="flex-1 overflow-hidden relative">
+
+        <!-- ==================== CAJA ==================== -->
+        <div x-show="view === 'pos'" class="h-full flex flex-col lg:flex-row" x-transition.opacity>
+            <!-- Panel de Menú - scrolleable -->
+            <div class="flex-1 overflow-y-auto bg-white pb-24 lg:pb-4 overscroll-contain" style="-webkit-overflow-scrolling: touch;">
+                <div class="p-2">
+                
+                <!-- Pastas -->
+                <div class="mb-3">
+                    <div class="text-xs font-bold text-gray-400 uppercase mb-1 flex items-center gap-2">
+                        <span class="bg-gray-100 rounded-full w-5 h-5 flex items-center justify-center text-[10px]">1</span>
+                        Pasta
+                    </div>
+                    <div class="grid grid-cols-3 gap-2">
+                        <template x-for="p in config.pastas">
+                            <button @click="selectPasta(p)"
+                                :class="sel.pasta?.name===p.name ? 'ring-2 ring-red-500 bg-red-50 text-red-800' : 'border-gray-200'"
+                                class="border rounded-xl p-2 h-16 md:h-20 flex flex-col items-center justify-center shadow-sm transition relative overflow-hidden">
+                                <span class="font-bold text-xs md:text-sm text-center leading-tight" x-text="p.name"></span>
+                                <!-- Stock solo visible para admin -->
+                                <div x-show="userRole === 'admin'" class="text-[10px] md:text-xs text-gray-500 mt-1 text-center leading-tight font-bold" x-html="getDetailedStock(p)"></div>
+                                <div x-show="getTotalStock(p) <= 0" class="absolute inset-0 bg-gray-200/90 flex items-center justify-center text-xs font-bold text-gray-500">AGOTADO</div>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Masas -->
+                <div class="mb-3" x-show="sel.pasta && sel.pasta.hasMasa">
+                    <div class="text-xs font-bold text-gray-400 uppercase mb-1 flex items-center gap-2">
+                        <span class="bg-gray-100 rounded-full w-5 h-5 flex items-center justify-center text-[10px]">2</span>
+                        Masa
+                    </div>
+                    <div class="grid grid-cols-3 gap-2">
+                        <template x-for="m in config.masas">
+                            <div x-show="isMasaAllowed(sel.pasta, m.name)">
+                                <button @click="selectMasa(m.name)" 
+                                    :class="[m.class, sel.masa===m.name ? 'ring-4 ring-offset-1' : '']" 
+                                    class="w-full border rounded-xl p-2 h-12 md:h-14 flex flex-col items-center justify-center font-bold text-xs md:text-sm shadow-sm relative transition">
+                                    <span x-text="m.name"></span>
+                                    <!-- Stock solo visible para admin -->
+                                    <span x-show="userRole === 'admin'" class="text-[10px] opacity-70" x-text="'Stock: ' + (stock[sel.pasta?.name+'_'+m.name]||0)"></span>
+                                    <div x-show="getAvailableStock(sel.pasta?.name, m.name) <= 0" class="absolute inset-0 bg-gray-500/80 text-white flex items-center justify-center backdrop-blur-sm rounded-xl font-bold text-xs">AGOTADO</div>
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Salsas -->
+                <div class="mb-4" x-show="sel.masa || (sel.pasta && !sel.pasta.hasMasa)">
+                    <div class="text-xs font-bold text-gray-400 uppercase mb-1 flex items-center gap-2">
+                        <span class="bg-gray-100 rounded-full w-5 h-5 flex items-center justify-center text-[10px]">3</span>
+                        Salsa
+                    </div>
+                    <div class="space-y-2">
+                        <template x-for="cat in config.cats">
+                            <div class="flex flex-col gap-1">
+                                <div class="text-[10px] font-bold text-gray-400 uppercase pl-1" x-text="cat.label"></div>
+                                <div class="grid grid-cols-2 gap-2">
+                                    <template x-for="s in config.salsas.filter(x => x.cat === cat.id)">
+                                        <button @click="addDish(s)" 
+                                                :disabled="s.disabled"
+                                                :class="[cat.class, s.disabled ? 'opacity-50 cursor-not-allowed grayscale' : '']" 
+                                                class="p-2 rounded-lg border text-left font-bold text-[11px] md:text-xs h-10 md:h-12 flex justify-between items-center shadow-sm btn-salsa transition active:scale-95 relative">
+                                            <span x-text="s.name" class="truncate pr-1"></span>
+                                            <span class="bg-white/50 px-1 rounded text-[10px] shrink-0" x-text="s.disabled ? '✕' : formatPrice(s.price + (sel.pasta?.priceDelta || 0))"></span>
+                                        </button>
+                                    </template>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Extras -->
+                <div class="pt-2 border-t">
+                    <div class="text-xs font-bold text-gray-400 uppercase mb-1">Extras</div>
+                    <div class="grid grid-cols-3 gap-2">
+                        <template x-for="e in config.extras">
+                            <button @click="handleExtraClick(e)"
+                                    :disabled="e.disabled || ((!e.variants || e.variants.length === 0) && e.trackStock === true && (stock['extra_'+e.name] || 0) <= 0)"
+                                    :class="e.disabled || ((!e.variants || e.variants.length === 0) && e.trackStock === true && (stock['extra_'+e.name] || 0) <= 0) ? 'opacity-50 cursor-not-allowed bg-gray-100' : 'bg-white'"
+                                    class="border border-gray-200 p-2 rounded-lg text-center h-12 md:h-14 flex flex-col justify-center items-center shadow-sm active:bg-gray-50 transition active:scale-95 relative">
+                                <span class="text-[10px] md:text-xs font-bold leading-tight" x-text="e.name"></span>
+                                <span class="text-[10px] font-bold"
+                                      :class="e.disabled ? 'text-gray-400' : ((!e.variants || e.variants.length === 0) && e.trackStock === true && (stock['extra_'+e.name] || 0) <= 0) ? 'text-red-500' : (e.variants && e.variants.length > 0 ? 'text-blue-600' : 'text-green-600')"
+                                      x-text="e.disabled ? 'AGOTADO' : ((!e.variants || e.variants.length === 0) && e.trackStock === true && (stock['extra_'+e.name] || 0) <= 0) ? 'SIN STOCK' : getExtraPriceDisplay(e)"></span>
+                                <!-- Indicador de variantes -->
+                                <div x-show="e.variants && e.variants.length > 0 && !e.disabled"
+                                     class="absolute top-0.5 right-0.5 bg-blue-500 text-white text-[8px] px-1 rounded-full font-bold">
+                                    <i class="fa-solid fa-plus text-[6px]"></i>
+                                </div>
+                                <!-- Indicador de stock para extras sin variantes -->
+                                <div x-show="(!e.variants || e.variants.length === 0) && e.trackStock === true && !e.disabled && (stock['extra_'+e.name] || 0) > 0"
+                                     class="absolute top-0.5 right-0.5 text-[8px] px-1 rounded-full font-bold"
+                                     :class="(stock['extra_'+e.name] || 0) < 3 ? 'bg-orange-500 text-white' : 'bg-blue-100 text-blue-600'"
+                                     x-text="stock['extra_'+e.name] || 0">
+                                </div>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+                
+                </div><!-- Cierre del div de padding -->
+            </div>
+
+            <!-- Panel Carrito - Normal en PC, Drawer en móvil -->
+
+            <!-- Overlay para móvil -->
+            <div x-show="cartDrawerOpen"
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="opacity-0"
+                 x-transition:enter-end="opacity-100"
+                 x-transition:leave="transition ease-in duration-200"
+                 x-transition:leave-start="opacity-100"
+                 x-transition:leave-end="opacity-0"
+                 @click="cartDrawerOpen = false"
+                 class="fixed inset-0 bg-black/50 z-40 lg:hidden">
+            </div>
+
+            <!-- Botón flotante carrito (solo móvil) -->
+            <button @click="cartDrawerOpen = true"
+                    x-show="!cartDrawerOpen"
+                    class="fixed bottom-4 right-4 z-30 lg:hidden bg-red-800 hover:bg-red-900 text-white rounded-full shadow-2xl flex flex-col items-center justify-center active:scale-95 transition"
+                    :class="cart.length > 0 ? 'w-20 h-20' : 'w-16 h-16'">
+                <i class="fa-solid fa-cart-shopping" :class="cart.length > 0 ? 'text-xl' : 'text-2xl'"></i>
+                <span x-show="cart.length > 0"
+                      class="text-[10px] font-bold text-yellow-300 mt-0.5"
+                      x-text="formatPrice(cartTotal)"></span>
+                <span x-show="cart.length > 0"
+                      class="absolute -top-1 -right-1 bg-yellow-400 text-red-900 text-xs font-black w-6 h-6 rounded-full flex items-center justify-center shadow-lg border-2 border-white"
+                      x-text="cart.length"></span>
+            </button>
+
+            <!-- Drawer del carrito (móvil) -->
+            <div x-show="cartDrawerOpen"
+                 x-transition:enter="transition ease-out duration-300"
+                 x-transition:enter-start="translate-y-full"
+                 x-transition:enter-end="translate-y-0"
+                 x-transition:leave="transition ease-in duration-200"
+                 x-transition:leave-start="translate-y-0"
+                 x-transition:leave-end="translate-y-full"
+                 class="fixed inset-x-0 bottom-0 z-50 lg:hidden bg-gray-50 rounded-t-2xl shadow-2xl flex flex-col max-h-[85vh]">
+
+                <!-- Handle del drawer -->
+                <div class="flex justify-center pt-2 pb-1">
+                    <div class="w-12 h-1.5 bg-gray-300 rounded-full"></div>
+                </div>
+
+                <!-- Header del drawer -->
+                <div class="p-3 bg-white border-b flex items-center gap-2" :class="editId ? 'bg-yellow-50' : ''">
+                    <button @click="cartDrawerOpen = false" class="text-gray-400 hover:text-gray-600 p-1">
+                        <i class="fa-solid fa-chevron-down text-lg"></i>
+                    </button>
+                    <div class="font-bold text-gray-800 flex items-center gap-2 text-base">
+                        <i class="fa-solid fa-cart-shopping text-red-800"></i>
+                        <span>Pedido</span>
+                        <span x-show="cart.length > 0" class="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full" x-text="cart.length + ' items'"></span>
+                    </div>
+                    <span x-show="editId" class="text-xs bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded font-bold animate-pulse">EDIT #<span x-text="editNum"></span></span>
+                    <div class="flex-1"></div>
+                    <span class="font-black text-green-600 text-lg" x-text="formatPrice(cartTotal)"></span>
+                </div>
+
+                <!-- Campo cliente -->
+                <div class="px-3 py-2 bg-white border-b">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-user text-gray-400"></i>
+                        <input x-model="customer" placeholder="Nombre del cliente..." class="border rounded-lg px-3 py-2 flex-1 text-sm focus:outline-none focus:ring-2 focus:ring-red-200">
+                    </div>
+                </div>
+
+                <!-- Items del carrito -->
+                <div class="flex-1 overflow-y-auto p-3 space-y-2">
+                    <template x-for="(item, idx) in cart" :key="idx">
+                        <div class="bg-white p-3 rounded-lg border shadow-sm flex justify-between items-start">
+                            <div class="flex-1 min-w-0">
+                                <div class="font-bold text-sm" x-text="(idx + 1) + '. ' + item.title"></div>
+                                <div class="text-xs text-gray-500" x-text="item.detail"></div>
+                                <input x-model="item.note" placeholder="Agregar nota..." class="text-xs border-b w-full mt-1 bg-transparent focus:outline-none focus:border-gray-400 py-1">
+                            </div>
+                            <div class="flex flex-col items-end gap-1 ml-2 shrink-0">
+                                <span class="font-bold text-sm text-green-600" x-text="formatPrice(item.price)"></span>
+                                <button @click="removeFromCart(idx)" class="text-red-400 hover:text-red-600 text-sm p-1"><i class="fa-solid fa-trash"></i></button>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="cart.length===0" class="text-center text-gray-400 py-8">
+                        <i class="fa-solid fa-basket-shopping text-4xl mb-2 text-gray-300"></i>
+                        <p class="text-sm">Selecciona productos del menu</p>
+                    </div>
+                </div>
+
+                <!-- Footer del drawer -->
+                <div class="p-3 bg-white border-t space-y-3 shrink-0">
+                    <!-- Programar hora -->
+                    <div class="flex items-center gap-2 bg-gray-50 p-3 rounded-lg border">
+                        <i class="fa-solid fa-clock text-gray-400"></i>
+                        <span class="text-gray-600 text-sm font-bold shrink-0">Programar retiro:</span>
+                        <div class="flex-1 flex items-center gap-1">
+                            <input type="time" x-model="scheduledTime"
+                                   class="bg-white font-bold flex-1 outline-none text-right text-base border rounded-lg px-3 py-2 min-h-[44px]"
+                                   :class="scheduledTime ? 'text-blue-600' : 'text-gray-300'">
+                            <button x-show="scheduledTime" @click="scheduledTime = ''" type="button"
+                                    class="text-gray-400 hover:text-red-500 p-2 transition" title="Quitar hora">
+                                <i class="fa-solid fa-times"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Info de hora de creación (solo en modo edicion) -->
+                    <div x-show="editId" class="flex items-center gap-2 bg-yellow-50 p-3 rounded-lg border border-yellow-200">
+                        <i class="fa-solid fa-clock-rotate-left text-yellow-600"></i>
+                        <span class="text-gray-600 text-sm font-bold shrink-0">Hora creación:</span>
+                        <span class="font-bold text-yellow-800 text-right flex-1" x-text="editingTime"></span>
+                        <span class="text-[10px] text-gray-400">(no editable)</span>
+                    </div>
+
+                    <!-- Total -->
+                    <div class="flex justify-between items-center font-black text-lg bg-gray-100 p-3 rounded-lg">
+                        <span>Total</span>
+                        <span class="text-green-600 text-xl" x-text="formatPrice(cartTotal)"></span>
+                    </div>
+
+                    <!-- Botones de accion -->
+                    <div class="flex gap-2">
+                        <button @click="cancelOrder(); cartDrawerOpen = false" class="flex-1 bg-gray-200 text-gray-700 py-3 rounded-lg font-bold text-sm active:scale-95 transition">
+                            <i class="fa-solid fa-times mr-1"></i> Limpiar
+                        </button>
+                        <button @click="submitOrder(); if(cart.length === 0) cartDrawerOpen = false" :disabled="cart.length===0 || !canSubmitOrder()"
+                            class="flex-[2] bg-green-600 text-white py-3 rounded-lg font-bold text-sm shadow active:scale-95 transition disabled:opacity-50 disabled:scale-100">
+                            <i class="fa-solid fa-check mr-1"></i>
+                            <span x-text="editId ? 'GUARDAR CAMBIOS' : 'CONFIRMAR PEDIDO'"></span>
+                        </button>
+                    </div>
+
+                    <!-- Mensaje de error de stock -->
+                    <div x-show="stockError" class="text-xs text-red-500 text-center font-bold bg-red-50 p-2 rounded" x-text="stockError"></div>
+                </div>
+            </div>
+
+            <!-- Panel Carrito Desktop (solo visible en lg+) -->
+            <div class="hidden lg:flex w-96 bg-gray-50 border-l border-gray-200 flex-col shadow-2xl z-30">
+
+                <!-- Header del carrito -->
+                <div class="p-2 bg-white border-b flex items-center gap-2" :class="editId ? 'bg-yellow-50' : ''">
+                    <div class="font-bold text-gray-800 flex items-center gap-1 text-sm shrink-0">
+                        <span>Pedido</span>
+                        <span x-show="cart.length > 0" class="bg-red-500 text-white text-[10px] px-1.5 py-0.5 rounded-full" x-text="cart.length"></span>
+                    </div>
+                    <span x-show="editId" class="text-[10px] bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded font-bold animate-pulse shrink-0">EDIT #<span x-text="editNum"></span></span>
+                    <div class="flex-1"></div>
+                    <span class="font-black text-green-600 text-sm shrink-0" x-text="formatPrice(cartTotal)"></span>
+                    <button @click="cancelOrder()" class="text-xs text-red-500 underline shrink-0">Limpiar</button>
+                </div>
+
+                <!-- Items del carrito -->
+                <div class="flex-1 overflow-y-auto p-2 space-y-2">
+                    <template x-for="(item, idx) in cart" :key="idx">
+                        <div class="bg-white p-2 rounded border shadow-sm flex justify-between items-start">
+                            <div class="flex-1 min-w-0">
+                                <div class="font-bold text-sm truncate" x-text="(idx + 1) + '. ' + item.title"></div>
+                                <div class="text-[10px] text-gray-500" x-text="item.detail"></div>
+                                <input x-model="item.note" placeholder="Nota..." class="text-xs border-b w-full mt-0.5 bg-transparent focus:outline-none focus:border-gray-400">
+                            </div>
+                            <div class="flex flex-col items-end gap-0.5 ml-1 shrink-0">
+                                <span class="font-bold text-sm" x-text="formatPrice(item.price)"></span>
+                                <button @click="removeFromCart(idx)" class="text-red-400 text-xs p-0.5"><i class="fa-solid fa-trash"></i></button>
+                            </div>
+                        </div>
+                    </template>
+                    <div x-show="cart.length===0" class="text-center text-gray-400 text-xs mt-4 italic">
+                        <i class="fa-solid fa-basket-shopping text-xl mb-1 text-gray-300"></i><br>
+                        Selecciona productos
+                    </div>
+                </div>
+
+                <!-- Footer del carrito -->
+                <div class="p-3 bg-white border-t space-y-2 shrink-0">
+                    <!-- Total -->
+                    <div class="flex justify-between font-black text-lg">
+                        <span>Total</span>
+                        <span class="text-green-600" x-text="formatPrice(cartTotal)"></span>
+                    </div>
+
+                    <!-- Fila de tiempo y cliente -->
+                    <div class="flex gap-2 items-center">
+                        <div class="flex items-center gap-1 bg-gray-50 p-2 rounded border flex-1 min-h-[40px]">
+                            <i class="fa-solid fa-clock text-gray-400 text-sm"></i>
+                            <span class="text-gray-500 text-xs font-bold">Retiro:</span>
+                            <input type="time" x-model="scheduledTime"
+                                   class="bg-transparent font-bold flex-1 outline-none text-right text-sm min-w-0 h-8"
+                                   :class="scheduledTime ? 'text-blue-600' : 'text-gray-300'"
+                                   style="-webkit-appearance: none; appearance: none;">
+                            <button x-show="scheduledTime" @click="scheduledTime = ''" type="button"
+                                    class="text-gray-400 hover:text-red-500 text-xs transition" title="Quitar">
+                                <i class="fa-solid fa-times"></i>
+                            </button>
+                        </div>
+                        <input x-model="customer" placeholder="Cliente" class="border rounded px-2 py-1.5 w-28 text-xs focus:outline-none focus:ring-2 focus:ring-red-200">
+                    </div>
+
+                    <div x-show="editId" class="flex items-center gap-1 text-xs bg-yellow-50 p-2 rounded border border-yellow-200">
+                        <i class="fa-solid fa-clock-rotate-left text-yellow-600 text-[10px]"></i>
+                        <span class="text-gray-600 text-[10px] font-bold">Creado:</span>
+                        <span class="font-bold text-yellow-800 text-xs flex-1 text-right" x-text="editingTime"></span>
+                    </div>
+
+                    <button @click="submitOrder()" :disabled="cart.length===0 || !canSubmitOrder()"
+                        class="bg-green-600 text-white w-full rounded font-bold shadow active:scale-95 transition disabled:opacity-50 disabled:scale-100 h-10 text-sm">
+                        <span x-text="editId ? 'GUARDAR CAMBIOS' : 'CONFIRMAR PEDIDO'"></span>
+                    </button>
+                    <!-- Mensaje de error de stock -->
+                    <div x-show="stockError" class="text-[10px] text-red-500 text-center font-bold" x-text="stockError"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== COCINA ==================== -->
+        <div x-show="view === 'kitchen'" x-init="initKitchenSimpleMode()" class="h-full">
+
+            <!-- VISTA NORMAL -->
+            <div x-show="!kitchenSimpleMode" class="h-full bg-slate-200 p-2 flex flex-col lg:flex-row gap-2 overflow-hidden">
+
+            <!-- Pendientes (sin hora programada) -->
+            <div class="flex-1 flex flex-col min-h-0"
+                 :class="{'lg:w-1/3': hasScheduledOrders() && showReadyColumn, 'lg:w-1/2': hasScheduledOrders() || showReadyColumn, 'h-1/2 lg:h-full': (hasScheduledOrders() || showReadyColumn)}">
+                <div class="font-bold text-gray-600 mb-2 px-3 bg-white/50 rounded py-2 flex justify-between items-center shrink-0 shadow-sm text-sm">
+                    <span><i class="fa-solid fa-clock text-yellow-600 mr-2"></i> PENDIENTES</span>
+                    <div class="flex items-center gap-2">
+                        <button @click="toggleKitchenMode()" class="p-1.5 px-2 rounded transition text-xs font-bold bg-gray-700 text-white hover:bg-gray-800" title="Modo Simplificado">
+                            <i class="fa-solid fa-expand mr-1"></i> SIMPLE
+                        </button>
+                        <button @click="toggleSound()" class="p-1.5 rounded transition text-lg" :class="soundEnabled ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-300 hover:text-gray-400'" :title="soundEnabled ? 'Sonido activado' : 'Sonido desactivado'">
+                            <i class="fa-solid" :class="soundEnabled ? 'fa-bell' : 'fa-bell-slash'"></i>
+                        </button>
+                        <span class="bg-yellow-500 text-white text-xs px-2 py-1 rounded-full shadow" x-text="getPendingOrders().length"></span>
+                        <button @click="showReadyColumn = !showReadyColumn"
+                                class="text-xs px-2 py-1 rounded font-bold transition"
+                                :class="showReadyColumn ? 'bg-green-500 text-white' : 'bg-gray-300 text-gray-600'">
+                            <i class="fa-solid fa-check mr-1"></i>
+                            <span x-text="showReadyColumn ? 'LISTOS ✓' : 'LISTOS'"></span>
+                            <span class="ml-1 bg-white/30 px-1.5 rounded-full" x-text="getOrders('Listo').length"></span>
+                        </button>
+                    </div>
+                </div>
+                <div class="overflow-y-auto flex-1 pb-4 px-1" x-init="$nextTick(() => { if(view === 'kitchen') initSortable(); })" x-effect="if(view === 'kitchen') $nextTick(() => initSortable())">
+                    <div id="pending-orders-container" class="flex flex-col gap-2">
+                        <template x-for="o in getPendingOrders()" :key="o.id">
+                            <div class="p-2 rounded shadow-md" :class="getOrderCardClasses(o)" :data-order-id="o.id">
+                                <!-- Header compacto -->
+                                <div class="flex items-center gap-1.5 mb-2 pb-2 border-b border-dashed flex-wrap">
+                                    <div class="drag-handle text-gray-300 hover:text-gray-500 p-1 cursor-grab" title="Arrastrar para reordenar">
+                                        <i class="fa-solid fa-grip-vertical"></i>
+                                    </div>
+                                    <span class="font-black text-xl md:text-2xl" x-text="'#'+o.number"></span>
+                                    <span x-show="o.customer" class="font-bold text-blue-800 uppercase truncate text-base max-w-[100px] md:max-w-[150px]" x-text="o.customer"></span>
+                                    <div x-show="o.paymentMethod" class="text-sm px-2 py-0.5 rounded font-bold"
+                                         :class="o.paymentMethod === 'Efectivo' ? 'bg-green-500 text-white' : o.paymentMethod === 'Tarjeta' ? 'bg-blue-500 text-white' : 'bg-purple-500 text-white'">
+                                        <i :class="o.paymentMethod === 'Efectivo' ? 'fa-money-bill-wave' : o.paymentMethod === 'Tarjeta' ? 'fa-credit-card' : 'fa-building-columns'" class="fa-solid"></i>
+                                    </div>
+                                    <button @click="deleteOrder(o)" class="text-gray-300 hover:text-red-500 p-1.5 border rounded hover:bg-red-50 transition text-sm"><i class="fa-solid fa-trash"></i></button>
+                                    <button @click="editOrder(o)" class="text-gray-400 hover:text-blue-500 p-1.5 border rounded hover:bg-blue-50 transition text-sm"><i class="fa-solid fa-pencil"></i></button>
+                                    <button @click="openPaymentModal(o)" class="text-gray-400 hover:text-purple-500 p-1.5 border rounded hover:bg-purple-50 transition text-sm" title="Método de pago"><i class="fa-solid fa-credit-card"></i></button>
+                                    <button @click="openKitchenExtrasModal(o)" class="text-blue-400 hover:text-blue-600 p-1.5 border rounded hover:bg-blue-50 transition text-sm" title="Agregar extra"><i class="fa-solid fa-plus"></i></button>
+                                    <div class="flex-1"></div>
+                                    <span class="text-base text-gray-500 font-medium" x-text="formatTime(o.timestamp)"></span>
+                                    <span class="text-base font-bold" :class="getWaitTime(o.timestamp) > 20 ? 'text-red-500' : 'text-gray-500'" x-text="getWaitTimeDisplay(o.timestamp)"></span>
+                                    <span class="font-bold text-green-600 text-base" x-text="formatPrice(o.total)"></span>
+                                    <button @click="openReadyTimeModal(o)" class="bg-gray-100 hover:bg-gray-200 text-gray-600 p-1.5 rounded text-sm transition" title="Hora personalizada"><i class="fa-solid fa-clock"></i></button>
+                                    <button @click="markReady(o.id)" class="bg-green-600 text-white py-1.5 px-3 rounded font-bold text-sm shadow hover:bg-green-700 transition">
+                                        <i class="fa-solid fa-check"></i>
+                                    </button>
+                                </div>
+                                <!-- Platos -->
+                                <div class="space-y-1">
+                                    <template x-for="i in getDishes(o)">
+                                        <div class="text-base md:text-lg font-bold rounded px-2 py-1.5 bg-gray-50 border-l-4" :class="getMasaColor(i.masa).border">
+                                            <div class="flex flex-wrap items-center gap-1">
+                                                <span class="text-gray-800" x-text="i.pasta"></span>
+                                                <span class="font-black" :class="getMasaColor(i.masa).text" x-text="i.masa !== 'Normal' ? i.masa : ''"></span>
+                                                <span class="text-gray-400">→</span>
+                                                <span class="font-black" :class="getSalsaColor(i.salsa).text" x-text="i.salsa"></span>
+                                                <span x-show="i.note" class="text-red-600 text-base font-semibold ml-2" x-text="'(' + i.note + ')'"></span>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                                <!-- Extras en una línea separados por coma -->
+                                <div x-show="getExtrasText(o)" class="mt-1 text-sm text-blue-700 bg-blue-50 rounded px-2 py-1.5 border-l-4 border-blue-300">
+                                    <i class="fa-solid fa-plus-circle mr-1"></i>
+                                    <span x-text="getExtrasText(o)"></span>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                    <div x-show="getPendingOrders().length === 0" class="text-center text-gray-400 py-8">
+                        <i class="fa-solid fa-check-circle text-4xl text-green-300 mb-2"></i>
+                        <p class="text-sm">No hay pedidos pendientes</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Programados (solo visible si hay pedidos programados) -->
+            <div x-show="hasScheduledOrders()"
+                 x-transition:enter="transition ease-out duration-200"
+                 x-transition:enter-start="opacity-0 transform -translate-x-4"
+                 x-transition:enter-end="opacity-100 transform translate-x-0"
+                 class="flex flex-col min-h-0"
+                 :class="{'lg:w-1/3': showReadyColumn && !scheduledCollapsed, 'lg:w-1/2': !showReadyColumn && !scheduledCollapsed, 'h-1/2 lg:h-full': !scheduledCollapsed, 'lg:w-auto': scheduledCollapsed, 'flex-1': !scheduledCollapsed}">
+                <div @click="toggleScheduledCollapsed()"
+                     class="font-bold text-gray-600 mb-2 px-3 bg-blue-100/50 rounded flex justify-between items-center shrink-0 shadow-sm cursor-pointer hover:bg-blue-100 transition"
+                     :class="scheduledCollapsed ? 'py-4' : 'py-2'">
+                    <span :class="scheduledCollapsed ? 'text-lg' : 'text-sm'">
+                        <i class="fa-solid fa-calendar-clock text-blue-600 mr-2"></i> PROGRAMADOS
+                        <i class="fa-solid ml-2 text-blue-400" :class="scheduledCollapsed ? 'fa-chevron-down text-sm' : 'fa-chevron-up text-xs'"></i>
+                    </span>
+                    <span class="bg-blue-500 text-white px-2 py-1 rounded-full shadow" :class="scheduledCollapsed ? 'text-sm' : 'text-xs'" x-text="getScheduledOrders().length"></span>
+                </div>
+
+                <!-- Vista colapsada: preview de 3 pedidos -->
+                <div x-show="scheduledCollapsed" class="px-1 pb-2">
+                    <div class="flex flex-wrap gap-2">
+                        <template x-for="o in getScheduledPreview()" :key="o.id">
+                            <div class="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2 text-base font-bold text-blue-700">
+                                #<span x-text="o.number"></span> <span x-text="o.scheduledTime"></span>
+                            </div>
+                        </template>
+                        <span x-show="getScheduledOrders().length > 3" class="text-base text-blue-400 py-2 font-bold">+<span x-text="getScheduledOrders().length - 3"></span> más</span>
+                    </div>
+                </div>
+
+                <!-- Vista expandida: lista completa -->
+                <div x-show="!scheduledCollapsed" class="overflow-y-auto flex-1 pb-4 px-1">
+                    <div class="flex flex-col gap-2">
+                        <template x-for="o in getScheduledOrders()" :key="o.id">
+                            <div class="p-2 rounded shadow-md" :class="getOrderCardClasses(o)">
+                                <!-- Header compacto -->
+                                <div class="flex items-center gap-1.5 mb-2 pb-2 border-b border-dashed border-blue-200 flex-wrap">
+                                    <span class="font-black text-xl md:text-2xl" x-text="'#'+o.number"></span>
+                                    <span x-show="o.customer" class="font-bold text-blue-800 uppercase truncate text-base max-w-[100px] md:max-w-[150px]" x-text="o.customer"></span>
+                                    <div x-show="o.paymentMethod" class="text-sm px-2 py-0.5 rounded font-bold"
+                                         :class="o.paymentMethod === 'Efectivo' ? 'bg-green-500 text-white' : o.paymentMethod === 'Tarjeta' ? 'bg-blue-500 text-white' : 'bg-purple-500 text-white'">
+                                        <i :class="o.paymentMethod === 'Efectivo' ? 'fa-money-bill-wave' : o.paymentMethod === 'Tarjeta' ? 'fa-credit-card' : 'fa-building-columns'" class="fa-solid"></i>
+                                    </div>
+                                    <button @click="deleteOrder(o)" class="text-gray-300 hover:text-red-500 p-1.5 border rounded hover:bg-red-50 transition text-sm"><i class="fa-solid fa-trash"></i></button>
+                                    <button @click="editOrder(o)" class="text-gray-400 hover:text-blue-500 p-1.5 border rounded hover:bg-blue-50 transition text-sm"><i class="fa-solid fa-pencil"></i></button>
+                                    <button @click="openPaymentModal(o)" class="text-gray-400 hover:text-purple-500 p-1.5 border rounded hover:bg-purple-50 transition text-sm" title="Método de pago"><i class="fa-solid fa-credit-card"></i></button>
+                                    <button @click="openKitchenExtrasModal(o)" class="text-blue-400 hover:text-blue-600 p-1.5 border rounded hover:bg-blue-50 transition text-sm" title="Agregar extra"><i class="fa-solid fa-plus"></i></button>
+                                    <div class="flex-1"></div>
+                                    <!-- Hora programada destacada -->
+                                    <div class="bg-blue-500 text-white px-2 py-0.5 rounded text-base font-bold">
+                                        <i class="fa-solid fa-clock mr-1"></i><span x-text="o.scheduledTime"></span>
+                                    </div>
+                                    <span class="text-base font-bold px-1.5 rounded"
+                                          :class="getScheduledWaitDisplay(o).class.includes('red') ? 'bg-red-100 text-red-600' : getScheduledWaitDisplay(o).class.includes('green') ? 'bg-green-100 text-green-600' : 'bg-blue-100 text-blue-600'"
+                                          x-text="getScheduledWaitDisplay(o).time"></span>
+                                    <span class="font-bold text-green-600 text-base" x-text="formatPrice(o.total)"></span>
+                                    <button @click="openReadyTimeModal(o)" class="bg-gray-100 hover:bg-gray-200 text-gray-600 p-1.5 rounded text-sm transition" title="Hora personalizada"><i class="fa-solid fa-clock"></i></button>
+                                    <button @click="markReady(o.id)" class="bg-green-600 text-white py-1.5 px-3 rounded font-bold text-sm shadow hover:bg-green-700 transition">
+                                        <i class="fa-solid fa-check"></i>
+                                    </button>
+                                </div>
+                                <!-- Platos -->
+                                <div class="space-y-1">
+                                    <template x-for="i in getDishes(o)">
+                                        <div class="text-base md:text-lg font-bold rounded px-2 py-1.5 bg-gray-50 border-l-4" :class="getMasaColor(i.masa).border">
+                                            <div class="flex flex-wrap items-center gap-1">
+                                                <span class="text-gray-800" x-text="i.pasta"></span>
+                                                <span class="font-black" :class="getMasaColor(i.masa).text" x-text="i.masa !== 'Normal' ? i.masa : ''"></span>
+                                                <span class="text-gray-400">→</span>
+                                                <span class="font-black" :class="getSalsaColor(i.salsa).text" x-text="i.salsa"></span>
+                                                <span x-show="i.note" class="text-red-600 text-base font-semibold ml-2" x-text="'(' + i.note + ')'"></span>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                                <!-- Extras en una línea separados por coma -->
+                                <div x-show="getExtrasText(o)" class="mt-1 text-sm text-blue-700 bg-blue-50 rounded px-2 py-1.5 border-l-4 border-blue-300">
+                                    <i class="fa-solid fa-plus-circle mr-1"></i>
+                                    <span x-text="getExtrasText(o)"></span>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Listos (con toggle) -->
+            <div x-show="showReadyColumn"
+                 x-transition:enter="transition ease-out duration-200"
+                 x-transition:enter-start="opacity-0 transform translate-x-4"
+                 x-transition:enter-end="opacity-100 transform translate-x-0"
+                 class="flex-1 flex flex-col min-h-0"
+                 :class="{'lg:w-1/3': hasScheduledOrders(), 'lg:w-1/2': !hasScheduledOrders(), 'h-1/2 lg:h-full': true}">
+                <div class="font-bold text-gray-600 mb-2 px-3 bg-white/50 rounded py-2 flex justify-between items-center shrink-0 shadow-sm text-sm">
+                    <span><i class="fa-solid fa-check text-green-600 mr-2"></i> LISTOS (HOY)</span>
+                    <span class="bg-green-500 text-white text-xs px-2 py-1 rounded-full shadow" x-text="getOrders('Listo').length"></span>
+                </div>
+                <div class="overflow-y-auto flex-1 pb-4 px-1">
+                    <div class="flex flex-col gap-2">
+                        <template x-for="o in getOrders('Listo')" :key="o.id">
+                            <div class="p-2 rounded shadow" :class="getOrderCardClasses(o)">
+                                <!-- Header compacto -->
+                                <div class="flex items-center gap-1.5 mb-2 pb-2 border-b border-dashed border-green-200 flex-wrap">
+                                    <span class="font-black text-xl md:text-2xl" x-text="'#'+o.number"></span>
+                                    <span x-show="o.customer" class="font-bold text-gray-700 uppercase truncate text-base max-w-[100px] md:max-w-[150px]" x-text="o.customer"></span>
+                                    <div x-show="o.paymentMethod" class="text-sm px-2 py-0.5 rounded font-bold"
+                                         :class="o.paymentMethod === 'Efectivo' ? 'bg-green-500 text-white' : o.paymentMethod === 'Tarjeta' ? 'bg-blue-500 text-white' : 'bg-purple-500 text-white'">
+                                        <i :class="o.paymentMethod === 'Efectivo' ? 'fa-money-bill-wave' : o.paymentMethod === 'Tarjeta' ? 'fa-credit-card' : 'fa-building-columns'" class="fa-solid"></i>
+                                    </div>
+                                    <button @click="deleteOrder(o)" class="text-gray-400 hover:text-red-600 p-1.5 border rounded hover:bg-red-50 transition text-sm" title="Eliminar"><i class="fa-solid fa-trash"></i></button>
+                                    <button @click="updateStatus(o.id, 'Pendiente')" class="text-blue-400 hover:text-blue-600 p-1.5 border rounded hover:bg-blue-50 transition text-sm" title="Volver"><i class="fa-solid fa-undo"></i></button>
+                                    <button @click="openPaymentModal(o)" class="text-purple-400 hover:text-purple-600 p-1.5 border rounded hover:bg-purple-50 transition text-sm" title="Pago"><i class="fa-solid fa-credit-card"></i></button>
+                                    <button @click="openKitchenExtrasModal(o)" class="text-blue-400 hover:text-blue-600 p-1.5 border rounded hover:bg-blue-50 transition text-sm" title="Agregar extra"><i class="fa-solid fa-plus"></i></button>
+                                    <button @click="editReadyTime(o)" class="text-green-500 hover:text-green-700 p-1.5 border rounded hover:bg-green-100 transition text-sm" title="Hora"><i class="fa-solid fa-clock"></i></button>
+                                    <div class="flex-1"></div>
+                                    <span class="text-base text-gray-500 font-medium" x-text="formatTime(o.timestamp)"></span>
+                                    <div x-show="o.readyTimestamp" class="text-base px-1.5 py-0.5 rounded font-bold"
+                                         :class="o.scheduledTime ? (getCompletionTime(o) <= 0 ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700') : 'bg-green-100 text-green-700'">
+                                        <i class="fa-solid fa-stopwatch"></i>
+                                        <span x-text="formatCompletionTime(o)"></span>
+                                    </div>
+                                    <span class="font-bold text-green-700 text-base" x-text="formatPrice(o.total)"></span>
+                                </div>
+                                <!-- Platos -->
+                                <div class="space-y-1">
+                                    <template x-for="i in getDishes(o)">
+                                        <div class="text-base md:text-lg font-bold rounded px-2 py-1.5 bg-green-100/50 border-l-4" :class="getMasaColor(i.masa).border">
+                                            <div class="flex flex-wrap items-center gap-1">
+                                                <span class="text-gray-700" x-text="i.pasta"></span>
+                                                <span class="font-black" :class="getMasaColor(i.masa).text" x-text="i.masa !== 'Normal' ? i.masa : ''"></span>
+                                                <span class="text-gray-400">→</span>
+                                                <span class="font-black" :class="getSalsaColor(i.salsa).text" x-text="i.salsa"></span>
+                                                <span x-show="i.note" class="text-red-600 text-base font-semibold ml-2" x-text="'(' + i.note + ')'"></span>
+                                            </div>
+                                        </div>
+                                    </template>
+                                </div>
+                                <!-- Extras en una línea separados por coma -->
+                                <div x-show="getExtrasText(o)" class="mt-1 text-sm text-blue-700 bg-blue-50 rounded px-2 py-1.5 border-l-4 border-blue-300">
+                                    <i class="fa-solid fa-plus-circle mr-1"></i>
+                                    <span x-text="getExtrasText(o)"></span>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+            </div> <!-- Fin vista normal -->
+
+            <!-- VISTA SIMPLIFICADA -->
+            <div x-show="kitchenSimpleMode" class="kitchen-simple h-full flex flex-col">
+                <!-- Header -->
+                <header class="bg-white shadow-md px-4 py-3 flex items-center justify-between shrink-0">
+                    <div class="flex items-center gap-4">
+                        <span class="text-2xl font-black text-gray-800">🍝 COCINA</span>
+                        <span class="bg-amber-500 text-white px-3 py-1 rounded-full font-bold text-lg" x-text="getSimpleModeOrders().length + ' pendientes'"></span>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <span class="text-gray-500 text-sm">Atajos: <span class="kbd">[1]</span> <span class="kbd">[2]</span> <span class="kbd">[3]</span> = Listo</span>
+                        <span class="text-gray-800 font-mono text-3xl font-bold" x-text="simpleModeClock"></span>
+                        <button @click="toggleSound()" class="p-2 rounded transition text-xl" :class="soundEnabled ? 'text-yellow-500 hover:text-yellow-600' : 'text-gray-400 hover:text-gray-500'">
+                            <i class="fa-solid" :class="soundEnabled ? 'fa-bell' : 'fa-bell-slash'"></i>
+                        </button>
+                        <button @click="toggleKitchenMode()" class="p-2 px-3 rounded transition text-sm font-bold bg-gray-200 text-gray-700 hover:bg-gray-300" title="Volver a vista normal">
+                            <i class="fa-solid fa-compress mr-1"></i> NORMAL
+                        </button>
+                    </div>
+                </header>
+
+                <!-- Grid de pedidos -->
+                <div class="flex-1 overflow-y-auto p-4">
+                    <!-- Estado vacío -->
+                    <div x-show="getSimpleModeOrders().length === 0" class="flex flex-col items-center justify-center h-full">
+                        <i class="fa-solid fa-check-circle text-8xl text-green-500 mb-4"></i>
+                        <h2 class="text-4xl font-black text-gray-700 mb-2">¡Todo listo!</h2>
+                        <p class="text-xl text-gray-500">No hay pedidos pendientes</p>
+                    </div>
+
+                    <!-- Grid de tarjetas -->
+                    <div x-show="getSimpleModeOrders().length > 0" class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                        <template x-for="(order, idx) in getSimpleModeOrders()" :key="order.id">
+                            <div class="order-card bg-white rounded-2xl shadow-lg overflow-hidden" :class="getSimpleCardClasses(order)">
+                                <!-- Header de la tarjeta -->
+                                <div class="p-4 rounded-t-2xl" :class="getSimpleHeaderClasses(order)">
+                                    <div class="flex items-start justify-between">
+                                        <div class="flex items-center gap-3">
+                                            <span class="text-5xl font-black text-white" x-text="'#' + order.number"></span>
+                                            <div>
+                                                <div x-show="order.customer" class="text-xl font-bold text-white uppercase" x-text="order.customer"></div>
+                                                <div class="text-white/80 text-lg font-medium">
+                                                    <span x-show="order.scheduledTime" x-text="order.scheduledTime + ' - '"></span>
+                                                    <span x-text="getSimpleWaitDisplay(order)"></span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <span x-show="idx < 9" class="bg-white/30 text-white px-2 py-1 rounded text-sm font-mono font-bold shadow" x-text="idx + 1"></span>
+                                    </div>
+                                </div>
+
+                                <!-- Cuerpo - Lista de platos -->
+                                <div class="p-4 space-y-2">
+                                    <template x-for="item in getDishes(order)" :key="item.pasta + item.masa + item.salsa + Math.random()">
+                                        <div class="rounded-lg px-3 py-2 border-l-4" :class="getSimpleMasaClasses(item.masa).bg + ' ' + getSimpleMasaClasses(item.masa).border">
+                                            <div class="flex flex-wrap items-center gap-2">
+                                                <span class="text-2xl font-bold text-gray-800" x-text="item.pasta"></span>
+                                                <span x-show="item.masa !== 'Normal'" class="text-xl font-black" :class="getSimpleMasaClasses(item.masa).text" x-text="item.masa"></span>
+                                                <span class="text-2xl text-gray-400">→</span>
+                                                <span class="text-2xl font-black" :class="getSimpleSalsaColor(item.salsa)" x-text="item.salsa"></span>
+                                            </div>
+                                            <div x-show="item.note" class="mt-1 bg-red-50 text-red-600 font-bold px-2 py-1 rounded text-lg">
+                                                <i class="fa-solid fa-triangle-exclamation mr-1"></i>
+                                                <span x-text="item.note"></span>
+                                            </div>
+                                        </div>
+                                    </template>
+
+                                    <!-- Extras -->
+                                    <div x-show="getExtrasText(order)" class="bg-blue-50 text-blue-700 rounded-lg px-3 py-2 text-lg font-medium">
+                                        <i class="fa-solid fa-plus-circle mr-2"></i>
+                                        <span x-text="getExtrasText(order)"></span>
+                                    </div>
+                                </div>
+
+                                <!-- Botón LISTO -->
+                                <button @click="markReady(order.id)" class="btn-ready w-full bg-green-500 hover:bg-green-600 text-white py-4 text-3xl font-black transition">
+                                    <i class="fa-solid fa-check mr-2"></i> LISTO
+                                </button>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Footer fijo -->
+                <footer class="bg-white shadow-inner border-t border-gray-200 px-4 py-3 flex items-center justify-between shrink-0">
+                    <div class="flex items-center gap-6 text-sm">
+                        <span class="flex items-center gap-2">
+                            <span class="w-4 h-4 rounded bg-gradient-to-r from-amber-400 to-amber-500"></span>
+                            <span class="text-gray-600">Normal</span>
+                        </span>
+                        <span class="flex items-center gap-2">
+                            <span class="w-4 h-4 rounded bg-gradient-to-r from-red-500 to-red-600"></span>
+                            <span class="text-gray-600">Urgente (+15 min)</span>
+                        </span>
+                        <span class="flex items-center gap-2">
+                            <span class="w-4 h-4 rounded bg-gradient-to-r from-blue-500 to-blue-600 ring-2 ring-blue-400"></span>
+                            <span class="text-gray-600">Programado</span>
+                        </span>
+                    </div>
+                    <div class="flex items-center gap-6 text-lg">
+                        <span class="text-gray-600">
+                            <i class="fa-solid fa-utensils mr-2"></i>
+                            <span class="text-gray-800 font-bold" x-text="todayDishCount"></span> platos hoy
+                        </span>
+                        <span class="text-gray-600">
+                            <i class="fa-solid fa-check-double mr-2 text-green-500"></i>
+                            <span class="text-gray-800 font-bold" x-text="getTodayDeliveredCount()"></span> entregados
+                        </span>
+                    </div>
+                </footer>
+            </div>
+        </div>
+
+        <!-- ==================== STOCK ==================== -->
+        <div x-show="view === 'stock'" class="h-full bg-white p-2 md:p-4 overflow-y-auto">
+            <!-- Candado de edición -->
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <h2 class="text-lg md:text-xl font-bold text-gray-800">Control Stock</h2>
+                <button @click="stockLocked = !stockLocked" 
+                        :class="stockLocked ? 'bg-red-100 text-red-600 border-red-200' : 'bg-green-100 text-green-600 border-green-200'"
+                        class="px-3 py-2 rounded-lg border font-bold text-xs flex items-center gap-2 transition">
+                    <i :class="stockLocked ? 'fa-lock' : 'fa-lock-open'" class="fa-solid"></i>
+                    <span x-text="stockLocked ? 'BLOQUEADO' : 'DESBLOQUEADO'"></span>
+                </button>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="w-full text-left text-xs md:text-sm border-collapse min-w-[500px]">
+                    <thead>
+                        <tr class="bg-gray-100 text-gray-500 uppercase text-[10px] md:text-xs">
+                            <th class="p-2 md:p-3 border">Pasta</th>
+                            <template x-for="m in config.masas">
+                                <th class="p-2 md:p-3 border text-center" x-text="m.name" :class="'text-'+m.color+'-700 bg-'+m.color+'-50'"></th>
+                            </template>
+                            <th class="p-2 md:p-3 border text-center bg-gray-200 font-bold text-gray-700">TOTAL</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <template x-for="p in config.pastas">
+                            <tr class="hover:bg-gray-50">
+                                <td class="p-3 md:p-3 border font-bold text-gray-700 text-sm md:text-base" x-text="p.name"></td>
+
+                                <template x-if="p.hasMasa">
+                                    <template x-for="m in config.masas">
+                                        <td class="p-2 md:p-2 border text-center" :class="'bg-'+m.color+'-50/30'">
+                                            <div x-show="isMasaAllowed(p, m.name)" class="flex items-center justify-center gap-2">
+                                                <button @click="updateStock(p.name, m.name, -1)"
+                                                        :disabled="stockLocked"
+                                                        :class="stockLocked ? 'opacity-30 cursor-not-allowed' : 'hover:bg-red-200'"
+                                                        class="w-10 h-10 md:w-9 md:h-9 bg-red-100 text-red-600 rounded-full font-bold text-lg md:text-base">-</button>
+                                                <span class="font-bold w-8 md:w-8 text-xl md:text-xl"
+                                                      :class="[(stock[p.name+'_'+m.name]||0)<5 ? 'text-red-500':'', 'text-'+m.color+'-700']"
+                                                      x-text="stock[p.name+'_'+m.name] || 0"></span>
+                                                <button @click="updateStock(p.name, m.name, 1)"
+                                                        :disabled="stockLocked"
+                                                        :class="stockLocked ? 'opacity-30 cursor-not-allowed' : 'hover:bg-green-200'"
+                                                        class="w-10 h-10 md:w-9 md:h-9 bg-green-100 text-green-600 rounded-full font-bold text-lg md:text-base">+</button>
+                                            </div>
+                                        </td>
+                                    </template>
+                                </template>
+
+                                <template x-if="!p.hasMasa">
+                                    <td class="p-2 md:p-2 border text-center bg-gray-50" :colspan="config.masas.length">
+                                        <div class="flex items-center justify-center gap-3 md:gap-3">
+                                            <button @click="updateStock(p.name, 'Normal', -1)"
+                                                    :disabled="stockLocked"
+                                                    :class="stockLocked ? 'opacity-30 cursor-not-allowed' : 'hover:bg-red-200'"
+                                                    class="w-10 h-10 md:w-9 md:h-9 bg-red-100 text-red-600 rounded-full font-bold text-lg md:text-base">-</button>
+                                            <span class="font-bold w-8 md:w-8 text-xl md:text-xl" :class="(stock[p.name+'_Normal']||0)<5 ? 'text-red-500':''" x-text="stock[p.name+'_Normal'] || 0"></span>
+                                            <button @click="updateStock(p.name, 'Normal', 1)"
+                                                    :disabled="stockLocked"
+                                                    :class="stockLocked ? 'opacity-30 cursor-not-allowed' : 'hover:bg-green-200'"
+                                                    class="w-10 h-10 md:w-9 md:h-9 bg-green-100 text-green-600 rounded-full font-bold text-lg md:text-base">+</button>
+                                        </div>
+                                    </td>
+                                </template>
+
+                                <td class="p-2 md:p-2 border text-center text-lg md:text-xl font-black bg-gray-50" x-text="getStockRowTotal(p)"></td>
+                            </tr>
+                        </template>
+                        <tr class="bg-gray-200 font-bold border-t-2 border-gray-300 text-[10px] md:text-xs">
+                            <td class="p-2 text-right uppercase">Total:</td>
+                            <template x-for="m in config.masas">
+                                <td class="p-2 text-center text-sm md:text-lg font-black" x-text="getStockColTotal(m.name)"></td>
+                            </template>
+                            <td class="p-2 text-center text-gray-400">-</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            
+            <!-- Stock de Extras (solo los que tienen trackStock habilitado) -->
+            <div x-show="getTrackedExtras().length > 0" class="mt-6">
+                <div class="bg-blue-50 rounded-lg p-4 border border-blue-200">
+                    <h3 class="font-bold text-sm text-blue-800 mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-wine-bottle"></i>
+                        Stock Extras
+                    </h3>
+                    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                        <template x-for="item in getTrackedExtras()" :key="item.key">
+                            <div class="bg-white rounded-lg p-3 shadow-sm border">
+                                <div class="text-xs font-bold text-gray-700 mb-2 truncate" x-text="item.label"></div>
+                                <div class="flex items-center justify-center gap-2">
+                                    <button @click="updateExtraStock(item.key, -1)" 
+                                            :disabled="stockLocked"
+                                            :class="stockLocked ? 'opacity-30 cursor-not-allowed' : 'hover:bg-red-200'"
+                                            class="w-8 h-8 bg-red-100 text-red-600 rounded-full font-bold text-sm">-</button>
+                                    <span class="font-black text-xl w-10 text-center" 
+                                          :class="(stock['extra_'+item.key] || 0) < 3 ? 'text-red-500' : 'text-blue-600'"
+                                          x-text="stock['extra_'+item.key] || 0"></span>
+                                    <button @click="updateExtraStock(item.key, 1)" 
+                                            :disabled="stockLocked"
+                                            :class="stockLocked ? 'opacity-30 cursor-not-allowed' : 'hover:bg-green-200'"
+                                            class="w-8 h-8 bg-green-100 text-green-600 rounded-full font-bold text-sm">+</button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                    <p class="text-[10px] text-blue-600 mt-3 italic">
+                        <i class="fa-solid fa-info-circle mr-1"></i>
+                        Configura qué extras trackear en Admin > Extras > marcar "📦 Stock"
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== ESTADÍSTICAS ==================== -->
+        <div x-show="view === 'stats'" class="h-full bg-slate-50 p-2 md:p-4 overflow-y-auto" x-init="$watch('view', v => v === 'stats' && $nextTick(() => renderCharts()))">
+            
+            <div class="flex flex-col md:flex-row md:justify-between md:items-center gap-2 mb-4">
+                <h2 class="text-lg font-bold text-gray-800">Estadísticas</h2>
+                <div class="flex gap-2">
+                    <button @click="openHistoryModal()" class="bg-blue-600 text-white px-3 py-2 rounded shadow font-bold text-xs hover:bg-blue-700 flex items-center gap-2">
+                        <i class="fa-solid fa-clock-rotate-left"></i> Historial
+                    </button>
+                    <button @click="downloadAllData()" class="bg-green-600 text-white px-3 py-2 rounded shadow font-bold text-xs hover:bg-green-700 flex items-center gap-2">
+                        <i class="fa-solid fa-file-excel"></i> Exportar
+                    </button>
+                </div>
+            </div>
+
+            <!-- Filtros -->
+            <div class="bg-white p-3 md:p-4 rounded-lg shadow-sm mb-4 border border-gray-100">
+                <div class="flex flex-wrap gap-1 md:gap-2 mb-3">
+                    <button @click="setFilter('today')" :class="currentFilter==='today'?'bg-blue-600 text-white':'bg-gray-100 hover:bg-gray-200 text-gray-700'" class="px-2 md:px-3 py-1 rounded text-[10px] md:text-xs font-bold transition">Hoy</button>
+                    <button @click="setFilter('yesterday')" :class="currentFilter==='yesterday'?'bg-blue-600 text-white':'bg-gray-100 hover:bg-gray-200 text-gray-700'" class="px-2 md:px-3 py-1 rounded text-[10px] md:text-xs font-bold transition">Ayer</button>
+                    <button @click="setFilter('week')" :class="currentFilter==='week'?'bg-blue-600 text-white':'bg-gray-100 hover:bg-gray-200 text-gray-700'" class="px-2 md:px-3 py-1 rounded text-[10px] md:text-xs font-bold transition">Semana</button>
+                    <button @click="setFilter('prevWeek')" :class="currentFilter==='prevWeek'?'bg-blue-600 text-white':'bg-gray-100 hover:bg-gray-200 text-gray-700'" class="px-2 md:px-3 py-1 rounded text-[10px] md:text-xs font-bold transition">Pasada</button>
+                    <button @click="setFilter('month')" :class="currentFilter==='month'?'bg-blue-600 text-white':'bg-gray-100 hover:bg-gray-200 text-gray-700'" class="px-2 md:px-3 py-1 rounded text-[10px] md:text-xs font-bold transition">Mes</button>
+                </div>
+                <div class="flex items-center gap-2 md:gap-4 p-2 bg-gray-50 rounded-lg border border-gray-100 flex-wrap">
+                    <div class="w-32 md:w-36">
+                        <label class="block text-[10px] font-bold text-gray-500 mb-1">Fecha / Desde</label>
+                        <input type="date" x-model="dateFrom" class="border rounded-md p-1.5 text-xs font-bold text-gray-700 bg-white focus:ring-2 focus:ring-blue-200 outline-none w-full">
+                    </div>
+                    <label class="flex items-center gap-2 text-[10px] md:text-xs font-bold text-gray-500 cursor-pointer select-none py-2">
+                        <div class="relative inline-block w-8 h-4 align-middle select-none transition duration-200 ease-in">
+                            <input type="checkbox" x-model="isRangeMode" class="toggle-checkbox absolute block w-4 h-4 rounded-full bg-white border-4 appearance-none cursor-pointer border-gray-300"/>
+                            <label class="toggle-label block overflow-hidden h-4 rounded-full bg-gray-300 cursor-pointer"></label>
+                        </div>
+                        Rango
+                    </label>
+                    <div x-show="isRangeMode" x-transition.opacity class="w-32 md:w-36">
+                        <label class="block text-[10px] font-bold text-gray-500 mb-1">Hasta</label>
+                        <input type="date" x-model="dateTo" class="border rounded-md p-1.5 text-xs font-bold text-gray-700 bg-white focus:ring-2 focus:ring-blue-200 outline-none w-full">
+                    </div>
+                </div>
+            </div>
+
+            <!-- KPIs -->
+            <div class="grid grid-cols-2 lg:grid-cols-5 gap-2 md:gap-4 mb-4">
+                <div class="bg-green-600 p-2 md:p-3 rounded shadow text-white">
+                    <div class="text-green-100 text-[10px] uppercase font-bold">Ventas</div>
+                    <div class="text-base md:text-xl font-black" x-text="formatPrice(filteredStats.total)"></div>
+                </div>
+                <div class="bg-blue-600 p-2 md:p-3 rounded shadow text-white">
+                    <div class="text-blue-100 text-[10px] uppercase font-bold">Pedidos</div>
+                    <div class="text-base md:text-xl font-black" x-text="filteredStats.count"></div>
+                </div>
+                <div class="bg-orange-500 p-2 md:p-3 rounded shadow text-white">
+                    <div class="text-orange-100 text-[10px] uppercase font-bold">Platos</div>
+                    <div class="text-base md:text-xl font-black" x-text="filteredStats.dishCount"></div>
+                </div>
+                <div class="bg-purple-600 p-2 md:p-3 rounded shadow text-white">
+                    <div class="text-purple-100 text-[10px] uppercase font-bold">Prom/Día</div>
+                    <div class="text-base md:text-xl font-black" x-text="filteredStats.avgDishes"></div>
+                </div>
+                <div class="bg-cyan-600 p-2 md:p-3 rounded shadow text-white">
+                    <div class="text-cyan-100 text-[10px] uppercase font-bold"><i class="fa-solid fa-stopwatch mr-1"></i>T. Prep</div>
+                    <div class="text-base md:text-xl font-black" x-text="filteredStats.avgPrepTime !== null ? filteredStats.avgPrepTime + ' min' : '-'"></div>
+                    <div x-show="filteredStats.minPrepTime !== null" class="text-[10px] text-cyan-200" x-text="'(' + filteredStats.minPrepTime + '-' + filteredStats.maxPrepTime + ' min)'"></div>
+                </div>
+            </div>
+
+            <!-- GRÁFICOS -->
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+                <!-- Gráfico Platos por Día -->
+                <div class="bg-white p-3 md:p-4 rounded-lg shadow-sm border border-gray-100">
+                    <h3 class="font-bold text-gray-700 text-xs uppercase mb-3 border-b pb-2">🍝 Platos por Día</h3>
+                    <div class="h-48 md:h-64">
+                        <canvas id="chartDays"></canvas>
+                    </div>
+                </div>
+                
+                <!-- Gráfico Hora Peak -->
+                <div class="bg-white p-3 md:p-4 rounded-lg shadow-sm border border-gray-100">
+                    <h3 class="font-bold text-gray-700 text-xs uppercase mb-3 border-b pb-2">⏰ Platos por Hora</h3>
+                    <div class="h-48 md:h-64">
+                        <canvas id="chartHours"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Historial Diario -->
+            <div class="bg-white p-3 md:p-4 rounded-lg shadow-sm mb-4 border border-gray-100">
+                <h3 class="font-bold text-gray-700 text-xs uppercase mb-3 border-b pb-2">📅 Historial Diario</h3>
+                <div class="grid grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+                    <template x-for="day in dailyDishStats" :key="day.date">
+                        <div class="bg-gray-50 border border-gray-200 rounded-lg p-2 flex flex-col items-center justify-center shadow-sm">
+                            <div class="text-[10px] font-bold text-gray-500 mb-1" x-text="formatShortDate(day.date)"></div>
+                            <div class="text-lg md:text-2xl font-black text-blue-600" x-text="day.count"></div>
+                            <div class="text-[10px] font-bold text-gray-400 uppercase">Platos</div>
+                        </div>
+                    </template>
+                </div>
+                <div x-show="dailyDishStats.length === 0" class="text-center text-gray-400 text-xs italic py-4">Sin datos</div>
+            </div>
+
+            <!-- Rankings -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                <div class="bg-white p-3 rounded shadow flex flex-col h-52 md:h-64">
+                    <h3 class="font-bold mb-2 border-b pb-1 text-gray-700 text-xs uppercase">🏆 Top Platos</h3>
+                    <div class="flex-1 overflow-y-auto pr-1">
+                        <template x-for="(item, i) in filteredStats.topPastas">
+                            <div class="flex justify-between text-[10px] md:text-xs py-1 border-b border-gray-50 last:border-0">
+                                <div class="truncate pr-2">
+                                    <span class="font-bold text-gray-300 w-4 inline-block" x-text="i+1"></span> 
+                                    <span x-text="item.name" :class="item.count===0?'text-gray-400':''"></span>
+                                </div>
+                                <span class="font-bold px-1.5 py-0.5 rounded text-[10px]" :class="item.count>0 ? 'bg-yellow-100 text-yellow-800' : 'bg-gray-100 text-gray-400'" x-text="item.count"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="bg-white p-3 rounded shadow flex flex-col h-52 md:h-64">
+                    <h3 class="font-bold mb-2 border-b pb-1 text-gray-700 text-xs uppercase">🥫 Top Salsas</h3>
+                    <div class="flex-1 overflow-y-auto pr-1">
+                        <template x-for="(item, i) in filteredStats.topSauces">
+                            <div class="flex justify-between text-[10px] md:text-xs py-1 border-b border-gray-50 last:border-0">
+                                <div class="truncate pr-2">
+                                    <span class="font-bold text-gray-300 w-4 inline-block" x-text="i+1"></span> 
+                                    <span x-text="item.name" :class="item.count===0?'text-gray-400':''"></span>
+                                </div>
+                                <span class="font-bold px-1.5 py-0.5 rounded text-[10px]" :class="item.count>0 ? 'bg-red-100 text-red-800' : 'bg-gray-100 text-gray-400'" x-text="item.count"></span>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <div class="bg-white p-3 rounded shadow flex flex-col h-52 md:h-64">
+                    <div class="flex justify-between items-center mb-2 border-b pb-1">
+                        <h3 class="font-bold text-gray-700 text-xs uppercase">🍝 Top Combos</h3>
+                        <select x-model="comboLimit" class="text-[10px] border rounded bg-gray-50 p-1">
+                            <option value="5">Top 5</option>
+                            <option value="10">Top 10</option>
+                            <option value="15">Top 15</option>
+                            <option value="all">Todas</option>
+                        </select>
+                    </div>
+                    <div class="flex-1 overflow-y-auto pr-1 space-y-1">
+                        <template x-for="(item, i) in filteredStats.topCombinations">
+                            <div class="flex justify-between text-[10px] md:text-xs py-1 border-b border-gray-50 last:border-0 hover:bg-gray-50">
+                                <div class="truncate pr-2 flex gap-1">
+                                    <span class="font-bold text-gray-300 w-4 inline-block" x-text="i+1"></span> 
+                                    <span x-text="item.name"></span>
+                                </div>
+                                <span class="font-bold bg-orange-100 px-1.5 py-0.5 rounded text-orange-800 text-[10px]" x-text="item.count"></span>
+                            </div>
+                        </template>
+                        <div x-show="filteredStats.topCombinations.length===0" class="text-xs text-gray-400 italic text-center pt-4">Sin datos</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Resumen por Semanas (solo si hay más de una semana) -->
+            <div x-show="filteredStats.weeklyBreakdown && filteredStats.weeklyBreakdown.length > 1" class="mt-4">
+                <div class="bg-white rounded-xl shadow p-4">
+                    <h3 class="font-bold text-sm text-gray-700 mb-3 flex items-center gap-2">
+                        <i class="fa-solid fa-calendar-week text-purple-500"></i>
+                        Resumen por Semana
+                    </h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-xs">
+                            <thead>
+                                <tr class="text-gray-500 border-b">
+                                    <th class="text-left py-2 font-semibold">Semana</th>
+                                    <th class="text-center py-2 font-semibold">Platos</th>
+                                    <th class="text-center py-2 font-semibold">Días</th>
+                                    <th class="text-center py-2 font-semibold">Prom/Día</th>
+                                    <th class="text-center py-2 font-semibold">Pedidos</th>
+                                    <th class="text-center py-2 font-semibold">Prom/Ped</th>
+                                    <th class="text-right py-2 font-semibold">Total</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <template x-for="week in filteredStats.weeklyBreakdown" :key="week.weekNum">
+                                    <tr class="border-b border-gray-100 hover:bg-purple-50 transition">
+                                        <td class="py-2 font-medium text-gray-700" x-text="week.label"></td>
+                                        <td class="py-2 text-center">
+                                            <span class="bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold" x-text="week.dishes"></span>
+                                        </td>
+                                        <td class="py-2 text-center text-gray-500" x-text="week.activeDays"></td>
+                                        <td class="py-2 text-center">
+                                            <span class="bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full font-bold" x-text="week.avgPerDay"></span>
+                                        </td>
+                                        <td class="py-2 text-center text-gray-600" x-text="week.orders"></td>
+                                        <td class="py-2 text-center text-gray-600" x-text="week.avg"></td>
+                                        <td class="py-2 text-right font-bold text-green-600" x-text="formatPrice(week.total)"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                            <tfoot class="bg-gray-50 font-bold">
+                                <tr>
+                                    <td class="py-2">PROMEDIO</td>
+                                    <td class="py-2 text-center text-blue-600" x-text="filteredStats.weeklyBreakdown.length > 0 ? Math.round(filteredStats.dishCount / filteredStats.weeklyBreakdown.length) : '-'"></td>
+                                    <td class="py-2 text-center text-gray-500" x-text="filteredStats.weeklyBreakdown.length > 0 ? (filteredStats.weeklyBreakdown.reduce((sum, w) => sum + w.activeDays, 0) / filteredStats.weeklyBreakdown.length).toFixed(1) : '-'"></td>
+                                    <td class="py-2 text-center text-purple-600" x-text="filteredStats.weeklyBreakdown.length > 0 ? (filteredStats.weeklyBreakdown.reduce((sum, w) => sum + w.avgPerDay, 0) / filteredStats.weeklyBreakdown.length).toFixed(1) : '-'"></td>
+                                    <td class="py-2 text-center" x-text="filteredStats.weeklyBreakdown.length > 0 ? Math.round(filteredStats.count / filteredStats.weeklyBreakdown.length) : '-'"></td>
+                                    <td class="py-2 text-center" x-text="filteredStats.count > 0 ? (filteredStats.dishCount / filteredStats.count).toFixed(1) : '-'"></td>
+                                    <td class="py-2 text-right text-green-600" x-text="formatPrice(filteredStats.weeklyBreakdown.length > 0 ? Math.round(filteredStats.total / filteredStats.weeklyBreakdown.length) : 0)"></td>
+                                </tr>
+                                <tr class="border-t border-gray-300">
+                                    <td class="py-2">TOTAL</td>
+                                    <td class="py-2 text-center text-blue-600 font-black" x-text="filteredStats.dishCount"></td>
+                                    <td class="py-2 text-center text-gray-500" x-text="filteredStats.weeklyBreakdown.reduce((sum, w) => sum + w.activeDays, 0)"></td>
+                                    <td class="py-2 text-center text-gray-400">-</td>
+                                    <td class="py-2 text-center font-black" x-text="filteredStats.count"></td>
+                                    <td class="py-2 text-center text-gray-400">-</td>
+                                    <td class="py-2 text-right text-green-600 font-black" x-text="formatPrice(filteredStats.total)"></td>
+                                </tr>
+                            </tfoot>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== ADMIN ==================== -->
+        <div x-show="view === 'admin'" class="h-full bg-gray-100 p-2 md:p-4 overflow-y-auto">
+            
+            <!-- Candado de edición Admin -->
+            <div class="flex justify-between items-center mb-4 border-b pb-2">
+                <h2 class="text-lg md:text-xl font-bold text-gray-800">Administrar Menú</h2>
+                <button @click="adminLocked = !adminLocked" 
+                        :class="adminLocked ? 'bg-red-100 text-red-600 border-red-200' : 'bg-green-100 text-green-600 border-green-200'"
+                        class="px-3 py-2 rounded-lg border font-bold text-xs flex items-center gap-2 transition">
+                    <i :class="adminLocked ? 'fa-lock' : 'fa-lock-open'" class="fa-solid"></i>
+                    <span x-text="adminLocked ? 'BLOQUEADO' : 'DESBLOQUEADO'"></span>
+                </button>
+            </div>
+            
+            <div class="grid md:grid-cols-2 lg:grid-cols-3 gap-4 pb-20">
+                <!-- Pastas -->
+                <div class="bg-white p-3 md:p-4 rounded shadow border-t-4 border-yellow-400 flex flex-col">
+                    <div class="flex justify-between items-center mb-4 border-b pb-2">
+                        <h3 class="font-bold text-sm">Pastas</h3>
+                        <button @click="addItem('pastas')" :disabled="adminLocked" :class="adminLocked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'" class="bg-green-500 text-white px-2 py-1 rounded text-xs font-bold">+ Agregar</button>
+                    </div>
+                    <div class="space-y-2 flex-1 overflow-y-auto">
+                        <template x-for="(p, i) in config.pastas" :key="i">
+                            <div class="flex flex-col gap-2 bg-gray-50 p-2 rounded border border-gray-100">
+                                <div class="flex gap-2 items-center">
+                                    <input x-model="p.name" @change="saveConfig()" :disabled="adminLocked" class="border rounded flex-1 text-xs p-1 font-bold disabled:opacity-50" placeholder="Nombre">
+                                    <div class="flex items-center gap-1">
+                                        <span class="text-[10px] text-gray-500">+$</span>
+                                        <input type="number" x-model.number="p.priceDelta" @change="saveConfig()" :disabled="adminLocked" class="border rounded w-16 text-xs p-1 text-center disabled:opacity-50" placeholder="0">
+                                    </div>
+                                    <button @click="removeItem('pastas', i)" :disabled="adminLocked" :class="adminLocked ? 'opacity-30' : 'hover:text-red-600'" class="text-red-400 px-1"><i class="fa-solid fa-times"></i></button>
+                                </div>
+                                <div class="flex items-center gap-2 text-xs text-gray-600">
+                                    <input type="checkbox" x-model="p.hasMasa" @change="saveConfig()" :disabled="adminLocked"> Requiere Masa
+                                </div>
+                                <div x-show="p.hasMasa" class="pl-2 border-l-2 border-yellow-200 bg-white p-1 rounded">
+                                    <div class="text-[10px] font-bold text-gray-400 uppercase mb-1">Masas Permitidas:</div>
+                                    <div class="grid grid-cols-2 gap-1">
+                                        <template x-for="m in config.masas">
+                                            <label class="flex items-center gap-1 text-[10px] cursor-pointer">
+                                                <input type="checkbox" :checked="isMasaAllowed(p, m.name)" @change="toggleAllowedMasa(i, m.name)" :disabled="adminLocked">
+                                                <span x-text="m.name"></span>
+                                            </label>
+                                        </template>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Salsas -->
+                <div class="bg-white p-3 md:p-4 rounded shadow border-t-4 border-red-400 flex flex-col">
+                    <div class="flex justify-between items-center mb-4 border-b pb-2">
+                        <h3 class="font-bold text-sm">Salsas</h3>
+                        <button @click="addItem('salsas')" :disabled="adminLocked" :class="adminLocked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'" class="bg-green-500 text-white px-2 py-1 rounded text-xs font-bold">+ Agregar</button>
+                    </div>
+                    <div class="space-y-2 flex-1 overflow-y-auto">
+                        <template x-for="(s, i) in config.salsas" :key="i">
+                            <div class="flex flex-col gap-1 bg-gray-50 p-2 rounded">
+                                <div class="flex gap-1 items-center">
+                                    <input x-model="s.name" @change="saveConfig()" :disabled="adminLocked" class="border rounded flex-1 text-xs p-1 disabled:opacity-50" placeholder="Nombre">
+                                    <select x-model="s.cat" @change="saveConfig()" :disabled="adminLocked" class="border rounded text-[10px] p-1 w-16 disabled:opacity-50">
+                                        <option value="roja">Roja</option>
+                                        <option value="alfredo">Blanca</option>
+                                        <option value="carne">Carne</option>
+                                        <option value="especial">Esp.</option>
+                                    </select>
+                                    <input type="number" x-model.number="s.price" @change="saveConfig()" :disabled="adminLocked" class="border rounded input-price-sm p-1 text-center disabled:opacity-50" placeholder="$">
+                                    <button @click="removeItem('salsas', i)" :disabled="adminLocked" :class="adminLocked ? 'opacity-30' : 'hover:text-red-600'" class="text-red-400 px-1"><i class="fa-solid fa-times"></i></button>
+                                </div>
+                                <!-- Toggle deshabilitado -->
+                                <label class="flex items-center gap-2 text-[10px] cursor-pointer text-gray-500">
+                                    <input type="checkbox" x-model="s.disabled" @change="saveConfig()" :disabled="adminLocked">
+                                    <span :class="s.disabled ? 'text-red-500 font-bold' : ''">Deshabilitada (agotada)</span>
+                                </label>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+
+                <!-- Extras -->
+                <div class="bg-white p-3 md:p-4 rounded shadow border-t-4 border-blue-400 md:col-span-2 lg:col-span-1 flex flex-col">
+                    <div class="flex justify-between items-center mb-4 border-b pb-2">
+                        <h3 class="font-bold text-sm">Extras</h3>
+                        <button @click="addItem('extras')" :disabled="adminLocked" :class="adminLocked ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600'" class="bg-green-500 text-white px-2 py-1 rounded text-xs font-bold">+ Agregar</button>
+                    </div>
+                    <div class="space-y-3 flex-1 overflow-y-auto">
+                        <template x-for="(e, i) in config.extras" :key="i">
+                            <div class="bg-gray-50 p-2 rounded border">
+                                <div class="flex gap-2 items-center mb-2">
+                                    <input x-model="e.name" @change="saveConfig()" :disabled="adminLocked" class="border rounded flex-1 text-xs p-1 font-bold disabled:opacity-50" placeholder="Nombre Extra">
+                                    <!-- Precio directo (visible cuando no hay variantes) -->
+                                    <div x-show="!e.variants || e.variants.length === 0" class="flex items-center gap-1">
+                                        <span class="text-[10px] text-gray-500">$</span>
+                                        <input type="number" x-model.number="e.price" @change="saveConfig()" :disabled="adminLocked" class="border rounded input-price-sm p-1 text-center disabled:opacity-50" placeholder="Precio">
+                                    </div>
+                                    <button @click="removeItem('extras', i)" :disabled="adminLocked" :class="adminLocked ? 'opacity-30' : 'hover:text-red-600'" class="text-red-400 px-1"><i class="fa-solid fa-trash"></i></button>
+                                </div>
+                                <!-- Opciones para extra sin variantes -->
+                                <div x-show="!e.variants || e.variants.length === 0" class="flex gap-3 mb-2">
+                                    <label class="flex items-center gap-1 text-[10px] cursor-pointer text-gray-500">
+                                        <input type="checkbox" x-model="e.disabled" @change="saveConfig()" :disabled="adminLocked">
+                                        <span :class="e.disabled ? 'text-red-500 font-bold' : ''">Deshabilitado</span>
+                                    </label>
+                                    <label class="flex items-center gap-1 text-[10px] cursor-pointer text-blue-500">
+                                        <input type="checkbox" x-model="e.trackStock" @change="saveConfig()" :disabled="adminLocked">
+                                        <span :class="e.trackStock ? 'font-bold' : ''">📦 Stock</span>
+                                    </label>
+                                </div>
+                                <!-- Toggle deshabilitado para extra con variantes -->
+                                <label x-show="e.variants && e.variants.length > 0" class="flex items-center gap-2 text-[10px] cursor-pointer text-gray-500 mb-2">
+                                    <input type="checkbox" x-model="e.disabled" @change="saveConfig()" :disabled="adminLocked">
+                                    <span :class="e.disabled ? 'text-red-500 font-bold' : ''">Deshabilitado (agotado)</span>
+                                </label>
+
+                                <div class="pl-2 border-l-2 border-blue-200">
+                                    <div class="text-xs font-bold text-gray-500 mb-1 flex justify-between items-center">
+                                        <span>Variantes <span class="font-normal text-gray-400">(opcional)</span></span>
+                                        <button @click="addVariant(i)" :disabled="adminLocked" :class="adminLocked ? 'opacity-30' : 'hover:underline'" class="text-green-500 text-[10px]">+ Opción</button>
+                                    </div>
+                                    <div class="space-y-1">
+                                        <template x-for="(v, j) in e.variants" :key="j">
+                                            <div class="flex flex-col gap-1 bg-white p-1 rounded">
+                                                <div class="flex gap-1 items-center">
+                                                    <input x-model="v.name" @change="saveConfig()" :disabled="adminLocked" class="border rounded flex-1 text-[10px] p-1 disabled:opacity-50" placeholder="Opción">
+                                                    <input type="number" x-model.number="v.price" @change="saveConfig()" :disabled="adminLocked" class="border rounded input-price-sm p-1 text-center disabled:opacity-50" placeholder="$">
+                                                    <button @click="removeVariant(i, j)" :disabled="adminLocked" :class="adminLocked ? 'opacity-30' : 'hover:text-red-500'" class="text-gray-400 px-1 text-xs"><i class="fa-solid fa-times"></i></button>
+                                                </div>
+                                                <div class="flex gap-3 pl-1">
+                                                    <label class="flex items-center gap-1 text-[10px] cursor-pointer text-gray-500">
+                                                        <input type="checkbox" x-model="v.disabled" @change="saveConfig()" :disabled="adminLocked">
+                                                        <span :class="v.disabled ? 'text-red-500 font-bold' : ''">Agotado</span>
+                                                    </label>
+                                                    <label class="flex items-center gap-1 text-[10px] cursor-pointer text-blue-500">
+                                                        <input type="checkbox" x-model="v.trackStock" @change="saveConfig()" :disabled="adminLocked">
+                                                        <span :class="v.trackStock ? 'font-bold' : ''">📦 Stock</span>
+                                                    </label>
+                                                </div>
+                                            </div>
+                                        </template>
+                                        <div x-show="!e.variants || e.variants.length === 0" class="text-[10px] text-gray-400 italic">Sin variantes - precio y stock directo</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Configuración PIN (solo visible si está desbloqueado) -->
+            <div x-show="!adminLocked" class="bg-white p-4 rounded shadow border-t-4 border-purple-400 mt-4">
+                <h3 class="font-bold text-sm mb-4 border-b pb-2">🔐 Configuración de Acceso</h3>
+                <div class="grid md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">PIN Admin (6 dígitos)</label>
+                        <input type="password" x-model="newAdminPin" maxlength="6" inputmode="numeric" class="border rounded w-full p-2 text-sm" placeholder="••••••">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-bold text-gray-500 mb-1">PIN Invitado (6 dígitos)</label>
+                        <input type="password" x-model="newGuestPin" maxlength="6" inputmode="numeric" class="border rounded w-full p-2 text-sm" placeholder="••••••">
+                    </div>
+                </div>
+                <button @click="savePins()" class="mt-4 bg-purple-600 text-white px-4 py-2 rounded font-bold text-xs hover:bg-purple-700">
+                    <i class="fa-solid fa-save mr-1"></i> Guardar PINs
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Firebase Config (debe cargarse antes de los modulos) -->
+    <script src="firebase-config.js"></script>
+
+    <!-- Modulos POS (orden importante) -->
+    <script src="js/namespace.js"></script>
+    <script src="js/config.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/auth.js"></script>
+    <script src="js/stock.js"></script>
+    <script src="js/cart.js"></script>
+    <script src="js/orders.js"></script>
+    <script src="js/kitchen.js"></script>
+    <script src="js/stats.js"></script>
+    <script src="js/admin.js"></script>
+    <script src="js/app.js"></script>
+
+</body>
+</html>

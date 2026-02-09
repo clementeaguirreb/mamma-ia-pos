@@ -1,0 +1,27 @@
+{
+  "env": {
+    "browser": true,
+    "es6": true
+  },
+  "globals": {
+    "firebase": "readonly",
+    "db": "readonly",
+    "auth": "readonly",
+    "Alpine": "readonly",
+    "MammaIA": "readonly",
+    "debounce": "readonly",
+    "Sortable": "readonly",
+    "Chart": "readonly",
+    "chartDaysInstance": "writable",
+    "chartHoursInstance": "writable"
+  },
+  "rules": {
+    "no-unused-vars": "warn",
+    "no-undef": "error",
+    "no-console": "off",
+    "eqeqeq": "warn"
+  },
+  "parserOptions": {
+    "ecmaVersion": 2020
+  }
+}

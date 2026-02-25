@@ -3,7 +3,7 @@
 Sistema de punto de venta en tiempo real diseñado para food trucks y pequeños restaurantes. Construido con Alpine.js, Tailwind CSS y Firebase.
 
 **[Ver Demo en Vivo](https://subtle-llama-2eaf80.netlify.app/)** · **[Video Demo](https://youtube.com/shorts/QJquPr44j8A?si=Hxge0y-YKB30rX97])**
-
+**PIN de acceso:** `123456`
 ![Mamma Ia POS Screenshot](docs/screenshot-pos.png)
 
 ## Caracteristicas
